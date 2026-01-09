@@ -6,7 +6,7 @@ import altair as alt
 
 # Configurações gerais
 SHEET_ID = "1Qf2TL2Pj6yHtU2IkehIT2CTgmW4Nj2CRQ85heVzTWgc"
-WORKSHEET_NAME = "Form Responses 1"
+WORKSHEET_NAME = "Respostas"
 
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
 
