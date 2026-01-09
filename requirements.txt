@@ -1,6 +1,6 @@
 streamlit
+pandas
 gspread
 google-auth
-pandas
-python-dateutil
 altair
+openpyxl
