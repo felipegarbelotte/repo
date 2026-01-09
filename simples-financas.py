@@ -10,20 +10,19 @@ WORKSHEET_NAME = "Respostas"
 
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
 
+# ----------------------------
+# Funções de carregamento
+# ----------------------------
 @st.cache_data(ttl=300)
-def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
-    # Escopo de acesso
+def load_google_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     scope = [
         "https://www.googleapis.com/auth/spreadsheets.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
     ]
-    
     creds_dict = st.secrets["google"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
     client = gspread.authorize(creds)
-    
 
-    # Carrega dados da planilha
     ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
     records = ws.get_all_records()
     df = pd.DataFrame(records)
@@ -67,12 +66,25 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     elif "timestamp" in df.columns:
         df["data"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
-    # Remove linhas inválidas
-    df = df.dropna(subset=["valor", "data"])
-    return df
-df = load_data(SHEET_ID, WORKSHEET_NAME)
-st.write("Prévia dos dados:", df.head())
-# KPIs
+    return df.dropna(subset=["valor", "data"])
+
+def load_excel_file(uploaded_file) -> pd.DataFrame:
+    df = pd.read_excel(uploaded_file)
+    colmap = {
+        "Tipo de lançamento": "tipo",
+        "Categoria": "categoria",
+        "Descrição": "descricao",
+        "Valor": "valor",
+        "Data recebimto/pgmto": "data",
+    }
+    df = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
+    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+    df["data"] = pd.to_datetime(df["data"], errors="coerce")
+    return df.dropna(subset=["valor", "data"])
+
+# ----------------------------
+# KPIs e Gráficos
+# ----------------------------
 def kpi_cards(df: pd.DataFrame):
     receitas = df.loc[df["tipo"].str.lower() == "receita", "valor"].sum() if "tipo" in df.columns else 0
     despesas = df.loc[df["tipo"].str.lower() == "despesa", "valor"].sum() if "tipo" in df.columns else 0
@@ -83,7 +95,6 @@ def kpi_cards(df: pd.DataFrame):
     col2.metric("Despesas (R$)", f"{despesas:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
     col3.metric("Saldo (R$)", f"{saldo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-# Gráficos mensais
 def monthly_charts(df: pd.DataFrame):
     if "tipo" not in df.columns:
         st.info("Coluna 'Tipo de lançamento' não encontrada.")
@@ -113,7 +124,6 @@ def monthly_charts(df: pd.DataFrame):
     st.subheader("Evolução mensal: receitas, despesas e saldo")
     st.altair_chart(chart, use_container_width=True)
 
-# Gráfico por categoria
 def category_chart(df: pd.DataFrame):
     if "categoria" in df.columns:
         despesas_cat = df[df["tipo"].str.lower() == "despesa"].groupby("categoria")["valor"].sum().reset_index()
@@ -124,10 +134,7 @@ def category_chart(df: pd.DataFrame):
         ).properties(height=350)
         st.subheader("Despesas por categoria")
         st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Coluna 'Categoria' não encontrada.")
 
-# Gráfico por forma de pagamento
 def payment_chart(df: pd.DataFrame):
     if "forma_pagamento" in df.columns:
         por_forma = df.groupby("forma_pagamento")["valor"].sum().reset_index()
@@ -138,10 +145,7 @@ def payment_chart(df: pd.DataFrame):
         ).properties(height=300)
         st.subheader("Totais por forma de pagamento")
         st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Coluna 'Forma de pagamento' não encontrada.")
 
-# Top pessoas/fornecedores
 def top_people_chart(df: pd.DataFrame):
     if "pessoa_final" in df.columns:
         top = (
@@ -158,24 +162,21 @@ def top_people_chart(df: pd.DataFrame):
         ).properties(height=450)
         st.subheader("Top pessoas/fornecedores")
         st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Coluna unificada 'Pessoa Final' não encontrada.")
 
+# ----------------------------
 # Função principal
+# ----------------------------
 def main():
     st.title("Dashboard Financeiro")
-    st.caption("Fonte: Google Sheets (Form Responses 1)")
+    st.caption("Fonte: Google Sheets + lançamentos antigos")
 
-    df = load_data(SHEET_ID, WORKSHEET_NAME)
+    # Carrega dados do Google Sheets
+    df_google = load_google_data(SHEET_ID, WORKSHEET_NAME)
 
-    # Filtros
-    colA, colB, colC = st.columns(3)
-    tipos = sorted(df["tipo"].dropna().unique()) if "tipo" in df.columns else []
-    categorias = sorted(df["categoria"].dropna().unique()) if "categoria" in df.columns else []
-    formas = sorted(df["forma_pagamento"].dropna().unique()) if "forma_pagamento" in df.columns else []
-
-    sel_tipos = colA.multiselect("Tipo", tipos, default=tipos)
-    sel_categorias = colB.multiselect("Categoria", categorias, default=categorias)
-    sel_formas = colC.multiselect("Forma de pagamento", formas, default=formas)
-
-    # Aplica filtros
+    # Upload de lançamentos antigos
+    uploaded_file = st.file_uploader("Importar lançamentos antigos (Excel/CSV)", type=["xlsx", "csv"])
+    if uploaded_file:
+        df_excel = load_excel_file(uploaded_file)
+        df = pd.concat([df_google, df_excel], ignore_index=True)
+        st.success("Dados antigos importados com sucesso!")
+    else
