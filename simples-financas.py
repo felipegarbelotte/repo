@@ -179,4 +179,5 @@ def main():
         df_excel = load_excel_file(uploaded_file)
         df = pd.concat([df_google, df_excel], ignore_index=True)
         st.success("Dados antigos importados com sucesso!")
-    else
+else:
+    df = df_google
