@@ -7,6 +7,12 @@ import altair as alt
 
 SHEET_ID = "1Qf2TL2Pj6yHtU2IkehIT2CTgmW4Nj2CRQ85heVzTWgc"
 WORKSHEET_NAME = "Form Responses 1"
+    
+# Lê credenciais dos Secrets
+creds_dict = st.secrets["google"]
+creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+client = gspread.authorize(creds)
+
 
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
 
@@ -17,12 +23,6 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
         "https://www.googleapis.com/auth/drive.readonly",
     ]   
     # creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope) #credenciais local
-    
-# Lê credenciais dos Secrets
-creds_dict = st.secrets["google"]
-creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-client = gspread.authorize(creds)
-
 
     client = gspread.authorize(creds)
     ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
