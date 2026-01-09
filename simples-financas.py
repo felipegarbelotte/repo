@@ -38,7 +38,9 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
         "Forma de pagamento": "forma_pagamento",
         "De quem recebeu / Para quem pagou (lista)": "pessoa_lista",
         "Outro nome (digite manualmente)": "pessoa_texto",
+        "Pessoa Final": "pessoa_final",
         "Observações": "observacoes",
+        "Email Address": "email",
     }
     df = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
 
