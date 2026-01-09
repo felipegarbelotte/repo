@@ -76,7 +76,7 @@ def load_excel_file(uploaded_file) -> pd.DataFrame:
     if uploaded_file.name.lower().endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(uploaded_file, engine="openpyxl")
 
     # Padroniza nomes de colunas (planilha antiga)
     colmap = {
@@ -84,42 +84,38 @@ def load_excel_file(uploaded_file) -> pd.DataFrame:
         "Categoria": "categoria",
         "Descrição": "descricao",
         "Valor": "valor",
+        "Valor (R$)": "valor",
         "Data recebimto/pgmto": "data",
         "Data recebimento/pgmto": "data",
         "Data": "data",
     }
     df = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
 
-    # Valor
+    # Valor numérico
     if "valor" in df.columns:
-        # Se vier com ponto/virgula, normaliza
         df["valor"] = (
             df["valor"]
             .astype(str)
-            .str.replace(".", "", regex=False)
-            .str.replace(",", ".", regex=False)
+            .str.replace(".", "", regex=False)   # remove separador de milhar
+            .str.replace(",", ".", regex=False)  # usa ponto como decimal
         )
         df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
 
-    # Datas (planilha antiga costuma ser mm/dd/yyyy)
+    # Datas
     if "data" in df.columns:
-        # Tenta ambos formatos
-        df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=False)
-        # Se muitas nulas, tenta dayfirst=True
-        if df["data"].isna().mean() > 0.5:
-            df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=True)
+        df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=True)
 
     # Tipo em minúsculo para consistência
     if "tipo" in df.columns:
         df["tipo"] = df["tipo"].astype(str).str.strip()
 
-    # Mantém apenas colunas relevantes
-    cols_keep = ["tipo", "categoria", "descricao", "valor", "data"]
-    df = df[[c for c in cols_keep if c in df.columns]]
+    # Remove linhas inválidas apenas se colunas existirem
+    cols_check = [c for c in ["valor", "data"] if c in df.columns]
+    if cols_check:
+        df = df.dropna(subset=cols_check)
 
-    # Remove linhas inválidas
-    df = df.dropna(subset=["valor", "data"])
     return df
+
 
 
 # ----------------------------
