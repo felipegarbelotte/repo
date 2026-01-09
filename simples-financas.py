@@ -2,32 +2,33 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from dateutil import parser
 import altair as alt
 
+# Configurações gerais
 SHEET_ID = "1Qf2TL2Pj6yHtU2IkehIT2CTgmW4Nj2CRQ85heVzTWgc"
 WORKSHEET_NAME = "Form Responses 1"
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]       
-# Lê credenciais dos Secrets
-creds_dict = st.secrets["google"]
-creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-client = gspread.authorize(creds)
-
 
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
 
 @st.cache_data(ttl=300)
 def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
+    # Escopo de acesso
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
 
+    # Credenciais via Secrets (Streamlit Cloud)
+    creds_dict = st.secrets["google"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
     client = gspread.authorize(creds)
+
+    # Carrega dados da planilha
     ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
     records = ws.get_all_records()
     df = pd.DataFrame(records)
 
-    # Padroniza nomes de colunas esperadas (ajuste se diferente na sua planilha)
+    # Padroniza nomes de colunas
     colmap = {
         "Timestamp": "timestamp",
         "Tipo de lançamento": "tipo",
@@ -41,7 +42,7 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     }
     df = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
 
-    # Pessoa Final
+    # Pessoa final
     if "pessoa_lista" in df.columns or "pessoa_texto" in df.columns:
         df["pessoa_final"] = df.get("pessoa_texto", "").fillna("")
         mask_vazio = df["pessoa_final"].astype(str).str.strip() == ""
@@ -59,16 +60,16 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
         df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
 
     # Datas
-    # Tenta usar "Data do lançamento"; se não existir, usa "Timestamp"
     if "data" in df.columns:
         df["data"] = pd.to_datetime(df["data"], errors="coerce")
     elif "timestamp" in df.columns:
         df["data"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
-    # Limpa linhas sem valor ou sem data
+    # Remove linhas inválidas
     df = df.dropna(subset=["valor", "data"])
     return df
 
+# KPIs
 def kpi_cards(df: pd.DataFrame):
     receitas = df.loc[df["tipo"].str.lower() == "receita", "valor"].sum() if "tipo" in df.columns else 0
     despesas = df.loc[df["tipo"].str.lower() == "despesa", "valor"].sum() if "tipo" in df.columns else 0
@@ -79,6 +80,7 @@ def kpi_cards(df: pd.DataFrame):
     col2.metric("Despesas (R$)", f"{despesas:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
     col3.metric("Saldo (R$)", f"{saldo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
+# Gráficos mensais
 def monthly_charts(df: pd.DataFrame):
     if "tipo" not in df.columns:
         st.info("Coluna 'Tipo de lançamento' não encontrada.")
@@ -108,6 +110,7 @@ def monthly_charts(df: pd.DataFrame):
     st.subheader("Evolução mensal: receitas, despesas e saldo")
     st.altair_chart(chart, use_container_width=True)
 
+# Gráfico por categoria
 def category_chart(df: pd.DataFrame):
     if "categoria" in df.columns:
         despesas_cat = df[df["tipo"].str.lower() == "despesa"].groupby("categoria")["valor"].sum().reset_index()
@@ -121,6 +124,7 @@ def category_chart(df: pd.DataFrame):
     else:
         st.info("Coluna 'Categoria' não encontrada.")
 
+# Gráfico por forma de pagamento
 def payment_chart(df: pd.DataFrame):
     if "forma_pagamento" in df.columns:
         por_forma = df.groupby("forma_pagamento")["valor"].sum().reset_index()
@@ -134,6 +138,7 @@ def payment_chart(df: pd.DataFrame):
     else:
         st.info("Coluna 'Forma de pagamento' não encontrada.")
 
+# Top pessoas/fornecedores
 def top_people_chart(df: pd.DataFrame):
     if "pessoa_final" in df.columns:
         top = (
@@ -153,6 +158,7 @@ def top_people_chart(df: pd.DataFrame):
     else:
         st.info("Coluna unificada 'Pessoa Final' não encontrada.")
 
+# Função principal
 def main():
     st.title("Dashboard Financeiro")
     st.caption("Fonte: Google Sheets (Form Responses 1)")
@@ -170,26 +176,3 @@ def main():
     sel_formas = colC.multiselect("Forma de pagamento", formas, default=formas)
 
     # Aplica filtros
-    if "tipo" in df.columns:
-        df = df[df["tipo"].isin(sel_tipos)]
-    if "categoria" in df.columns:
-        df = df[df["categoria"].isin(sel_categorias)]
-    if "forma_pagamento" in df.columns:
-        df = df[df["forma_pagamento"].isin(sel_formas)]
-
-    kpi_cards(df)
-    monthly_charts(df)
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        category_chart(df)
-    with col2:
-        payment_chart(df)
-
-    top_people_chart(df)
-
-    st.divider()
-    st.caption("Dica: atualize os dados clicando no ícone de 'Rerun' do Streamlit. O cache expira a cada 5 minutos.")
-
-if __name__ == "__main__":
-    main()
