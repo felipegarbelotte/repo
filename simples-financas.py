@@ -27,7 +27,7 @@ def load_google_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     records = ws.get_all_records()
     df = pd.DataFrame(records)
 
-    # Padroniza nomes de colunas
+    # Padroniza nomes de colunas (Google Forms/Sheets)
     colmap = {
         "Timestamp": "timestamp",
         "Tipo de lançamento": "tipo",
@@ -62,30 +62,72 @@ def load_google_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
 
     # Datas
     if "data" in df.columns:
-        df["data"] = pd.to_datetime(df["data"], errors="coerce")
+        df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=False)
     elif "timestamp" in df.columns:
         df["data"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
-    return df.dropna(subset=["valor", "data"])
+    # Remove linhas inválidas
+    df = df.dropna(subset=["valor", "data"])
+    return df
+
 
 def load_excel_file(uploaded_file) -> pd.DataFrame:
-    df = pd.read_excel(uploaded_file)
+    # Detecta tipo do arquivo
+    if uploaded_file.name.lower().endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+
+    # Padroniza nomes de colunas (planilha antiga)
     colmap = {
         "Tipo de lançamento": "tipo",
         "Categoria": "categoria",
         "Descrição": "descricao",
         "Valor": "valor",
         "Data recebimto/pgmto": "data",
+        "Data recebimento/pgmto": "data",
+        "Data": "data",
     }
     df = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
-    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
-    df["data"] = pd.to_datetime(df["data"], errors="coerce")
-    return df.dropna(subset=["valor", "data"])
+
+    # Valor
+    if "valor" in df.columns:
+        # Se vier com ponto/virgula, normaliza
+        df["valor"] = (
+            df["valor"]
+            .astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace(",", ".", regex=False)
+        )
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+
+    # Datas (planilha antiga costuma ser mm/dd/yyyy)
+    if "data" in df.columns:
+        # Tenta ambos formatos
+        df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=False)
+        # Se muitas nulas, tenta dayfirst=True
+        if df["data"].isna().mean() > 0.5:
+            df["data"] = pd.to_datetime(df["data"], errors="coerce", dayfirst=True)
+
+    # Tipo em minúsculo para consistência
+    if "tipo" in df.columns:
+        df["tipo"] = df["tipo"].astype(str).str.strip()
+
+    # Mantém apenas colunas relevantes
+    cols_keep = ["tipo", "categoria", "descricao", "valor", "data"]
+    df = df[[c for c in cols_keep if c in df.columns]]
+
+    # Remove linhas inválidas
+    df = df.dropna(subset=["valor", "data"])
+    return df
+
 
 # ----------------------------
 # KPIs e Gráficos
 # ----------------------------
 def kpi_cards(df: pd.DataFrame):
+    if df.empty:
+        return
     receitas = df.loc[df["tipo"].str.lower() == "receita", "valor"].sum() if "tipo" in df.columns else 0
     despesas = df.loc[df["tipo"].str.lower() == "despesa", "valor"].sum() if "tipo" in df.columns else 0
     saldo = receitas - despesas
@@ -95,9 +137,10 @@ def kpi_cards(df: pd.DataFrame):
     col2.metric("Despesas (R$)", f"{despesas:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
     col3.metric("Saldo (R$)", f"{saldo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
+
 def monthly_charts(df: pd.DataFrame):
-    if "tipo" not in df.columns:
-        st.info("Coluna 'Tipo de lançamento' não encontrada.")
+    if df.empty or "tipo" not in df.columns or "data" not in df.columns:
+        st.info("Sem dados suficientes para evolução mensal.")
         return
 
     df["ano_mes"] = df["data"].dt.to_period("M").astype(str)
@@ -118,50 +161,63 @@ def monthly_charts(df: pd.DataFrame):
     chart = (
         alt.Chart(base)
         .mark_line(point=True)
-        .encode(x=alt.X("ano_mes:N", title="Ano-Mês"), y=alt.Y("valor:Q", title="Valor (R$)"), color="tipo:N")
+        .encode(
+            x=alt.X("ano_mes:N", title="Ano-Mês"),
+            y=alt.Y("valor:Q", title="Valor (R$)"),
+            color="tipo:N"
+        )
         .properties(height=300)
     )
     st.subheader("Evolução mensal: receitas, despesas e saldo")
     st.altair_chart(chart, use_container_width=True)
 
+
 def category_chart(df: pd.DataFrame):
-    if "categoria" in df.columns:
-        despesas_cat = df[df["tipo"].str.lower() == "despesa"].groupby("categoria")["valor"].sum().reset_index()
-        chart = alt.Chart(despesas_cat).mark_bar().encode(
-            x=alt.X("valor:Q", title="Valor (R$)"),
-            y=alt.Y("categoria:N", sort="-x", title="Categoria"),
-            tooltip=["categoria", "valor"]
-        ).properties(height=350)
-        st.subheader("Despesas por categoria")
-        st.altair_chart(chart, use_container_width=True)
+    if df.empty or "categoria" not in df.columns or "tipo" not in df.columns:
+        st.info("Sem dados suficientes para despesas por categoria.")
+        return
+    despesas_cat = df[df["tipo"].str.lower() == "despesa"].groupby("categoria")["valor"].sum().reset_index()
+    chart = alt.Chart(despesas_cat).mark_bar().encode(
+        x=alt.X("valor:Q", title="Valor (R$)"),
+        y=alt.Y("categoria:N", sort="-x", title="Categoria"),
+        tooltip=["categoria", "valor"]
+    ).properties(height=350)
+    st.subheader("Despesas por categoria")
+    st.altair_chart(chart, use_container_width=True)
+
 
 def payment_chart(df: pd.DataFrame):
-    if "forma_pagamento" in df.columns:
-        por_forma = df.groupby("forma_pagamento")["valor"].sum().reset_index()
-        chart = alt.Chart(por_forma).mark_bar().encode(
-            x=alt.X("valor:Q", title="Valor (R$)"),
-            y=alt.Y("forma_pagamento:N", sort="-x", title="Forma de pagamento"),
-            tooltip=["forma_pagamento", "valor"]
-        ).properties(height=300)
-        st.subheader("Totais por forma de pagamento")
-        st.altair_chart(chart, use_container_width=True)
+    if df.empty or "forma_pagamento" not in df.columns:
+        st.info("Sem dados suficientes para totais por forma de pagamento.")
+        return
+    por_forma = df.groupby("forma_pagamento")["valor"].sum().reset_index()
+    chart = alt.Chart(por_forma).mark_bar().encode(
+        x=alt.X("valor:Q", title="Valor (R$)"),
+        y=alt.Y("forma_pagamento:N", sort="-x", title="Forma de pagamento"),
+        tooltip=["forma_pagamento", "valor"]
+    ).properties(height=300)
+    st.subheader("Totais por forma de pagamento")
+    st.altair_chart(chart, use_container_width=True)
+
 
 def top_people_chart(df: pd.DataFrame):
-    if "pessoa_final" in df.columns:
-        top = (
-            df.groupby("pessoa_final")["valor"]
-            .sum()
-            .reset_index()
-            .sort_values("valor", ascending=False)
-            .head(15)
-        )
-        chart = alt.Chart(top).mark_bar().encode(
-            x=alt.X("valor:Q", title="Valor (R$)"),
-            y=alt.Y("pessoa_final:N", sort="-x", title="Pessoa/Fornecedor"),
-            tooltip=["pessoa_final", "valor"]
-        ).properties(height=450)
-        st.subheader("Top pessoas/fornecedores")
-        st.altair_chart(chart, use_container_width=True)
+    if df.empty or "pessoa_final" not in df.columns:
+        st.info("Sem dados suficientes para top pessoas/fornecedores.")
+        return
+    top = (
+        df.groupby("pessoa_final")["valor"]
+        .sum()
+        .reset_index()
+        .sort_values("valor", ascending=False)
+        .head(15)
+    )
+    chart = alt.Chart(top).mark_bar().encode(
+        x=alt.X("valor:Q", title="Valor (R$)"),
+        y=alt.Y("pessoa_final:N", sort="-x", title="Pessoa/Fornecedor"),
+        tooltip=["pessoa_final", "valor"]
+    ).properties(height=450)
+    st.subheader("Top pessoas/fornecedores")
+    st.altair_chart(chart, use_container_width=True)
 
 # ----------------------------
 # Função principal
@@ -179,5 +235,48 @@ def main():
         df_excel = load_excel_file(uploaded_file)
         df = pd.concat([df_google, df_excel], ignore_index=True)
         st.success("Dados antigos importados com sucesso!")
-else:
-    df = df_google
+    else:
+        df = df_google
+
+    # Prévia
+    st.write("Prévia dos dados consolidados:", df.head())
+
+    if df.empty:
+        st.warning("Nenhum dado para exibir. Verifique a aba da planilha e se há lançamentos.")
+        return
+
+    # Filtros
+    colA, colB, colC = st.columns(3)
+    tipos = sorted(df["tipo"].dropna().unique()) if "tipo" in df.columns else []
+    categorias = sorted(df["categoria"].dropna().unique()) if "categoria" in df.columns else []
+    formas = sorted(df["forma_pagamento"].dropna().unique()) if "forma_pagamento" in df.columns else []
+
+    sel_tipos = colA.multiselect("Tipo", tipos, default=tipos)
+    sel_categorias = colB.multiselect("Categoria", categorias, default=categorias)
+    sel_formas = colC.multiselect("Forma de pagamento", formas, default=formas)
+
+    # Aplica filtros
+    if "tipo" in df.columns and sel_tipos:
+        df = df[df["tipo"].isin(sel_tipos)]
+    if "categoria" in df.columns and sel_categorias:
+        df = df[df["categoria"].isin(sel_categorias)]
+    if "forma_pagamento" in df.columns and sel_formas:
+        df = df[df["forma_pagamento"].isin(sel_formas)]
+
+    # KPIs e gráficos
+    kpi_cards(df)
+    monthly_charts(df)
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        category_chart(df)
+    with col2:
+        payment_chart(df)
+
+    top_people_chart(df)
+
+    st.divider()
+    st.caption("Dica: atualize os dados clicando no ícone de 'Rerun'. O cache expira a cada 5 minutos.")
+
+if __name__ == "__main__":
+    main()
