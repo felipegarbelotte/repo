@@ -15,8 +15,9 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     scope = [
         "https://www.googleapis.com/auth/spreadsheets.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
+    ]   
+    # creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope) #credenciais local
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["google"], scope)
     client = gspread.authorize(creds)
     ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
     records = ws.get_all_records()
