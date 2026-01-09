@@ -68,7 +68,8 @@ def load_data(sheet_id: str, worksheet_name: str) -> pd.DataFrame:
     # Remove linhas inválidas
     df = df.dropna(subset=["valor", "data"])
     return df
-
+df = load_data(SHEET_ID, WORKSHEET_NAME)
+st.write("Prévia dos dados:", df.head())
 # KPIs
 def kpi_cards(df: pd.DataFrame):
     receitas = df.loc[df["tipo"].str.lower() == "receita", "valor"].sum() if "tipo" in df.columns else 0
